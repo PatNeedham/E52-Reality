@@ -1,0 +1,74 @@
+name: Code Quality
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  code-quality:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [22.x]
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        
+    - name: Install root dependencies
+      run: npm install --prefix . --save-dev prettier eslint @typescript-eslint/eslint-plugin @typescript-eslint/parser eslint-config-prettier
+      
+    # Backend Code Quality Checks
+    - name: Install backend dependencies
+      run: npm ci
+      working-directory: ./backend
+      
+    - name: Run backend type checking
+      run: npm run typecheck
+      working-directory: ./backend
+      
+    - name: Run backend linting
+      run: npm run lint
+      working-directory: ./backend
+      
+    - name: Check backend formatting
+      run: npm run format -- --check
+      working-directory: ./backend
+      
+    # Frontend Code Quality Checks  
+    - name: Install frontend dependencies
+      run: npm ci
+      working-directory: ./frontend
+      
+    - name: Run frontend type checking
+      run: npm run typecheck
+      working-directory: ./frontend
+      
+    - name: Run frontend linting
+      run: npm run lint
+      working-directory: ./frontend
+      
+    - name: Check frontend formatting
+      run: npm run format -- --check
+      working-directory: ./frontend
+      
+    # Build checks
+    - name: Build backend
+      run: npm run build
+      working-directory: ./backend
+      
+    - name: Build frontend
+      run: npm run build
+      working-directory: ./frontend
+      
+    # Test checks
+    - name: Run frontend tests
+      run: npm test
+      working-directory: ./frontend

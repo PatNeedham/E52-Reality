@@ -1,0 +1,26 @@
+{
+  "name": "e52",
+  "version": "1.0.0",
+  "description": "Welcome to the E52 Reality project! This is a full-stack web application for designing and simulating immersive VR motion experiences.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "quality:check": "./check-quality.sh",
+    "quality:fix": "npm run quality:fix:backend && npm run quality:fix:frontend",
+    "quality:fix:backend": "cd backend && npm run lint && npm run format",
+    "quality:fix:frontend": "cd frontend && npm run lint && npm run format",
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
+    "build:all": "cd backend && npm run build && cd ../frontend && npm run build"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.35.1",
+    "@typescript-eslint/parser": "^8.35.1",
+    "eslint": "^9.30.1",
+    "eslint-config-prettier": "^10.1.5",
+    "prettier": "^3.6.2",
+    "typescript": "^5.8.3"
+  }
+}
