@@ -4,13 +4,13 @@
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/worker.ts",
   "vars": {
-    "NODE_ENV": "production"
+    "NODE_ENV": "production",
   },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "e52-reality-db",
-      "database_id": "TBD"
-    }
-  ]
+      "database_id": "aef55e7d-a56b-4a5e-8c68-3ce0a4be4891",
+    },
+  ],
 }
