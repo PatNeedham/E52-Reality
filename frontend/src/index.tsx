@@ -3,7 +3,6 @@ import ReactDOM from 'react-dom/client';
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import './services/opentelemetry';
 import './i18n/config';
-import './index.css';
 import App from './App';
 import HomePage from './pages/HomePage';
 import MyLibrary from './pages/MyLibrary';

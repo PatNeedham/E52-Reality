@@ -6,6 +6,17 @@
     "node": true,
     "es2022": true
   },
+  "globals": {
+    "D1Database": "readonly",
+    "D1Result": "readonly",
+    "D1PreparedStatement": "readonly",
+    "KVNamespace": "readonly",
+    "R2Bucket": "readonly",
+    "DurableObjectNamespace": "readonly",
+    "Fetcher": "readonly",
+    "WebSocket": "readonly",
+    "ExecutionContext": "readonly"
+  },
   "rules": {
     "no-console": "off"
   }

@@ -19,7 +19,7 @@ describe('Header component', () => {
         <Header />
       </MemoryRouter>
     );
-    expect(screen.getByText('E52 Reality')).toBeInTheDocument();
+    expect(screen.getByText('welcome')).toBeInTheDocument();
   });
 
   it('renders navigation links', () => {
@@ -28,7 +28,7 @@ describe('Header component', () => {
         <Header />
       </MemoryRouter>
     );
-    expect(screen.getByText('My Library')).toBeInTheDocument();
-    expect(screen.getByText('Discover')).toBeInTheDocument();
+    expect(screen.getByText('my_library')).toBeInTheDocument();
+    expect(screen.getByText('discover')).toBeInTheDocument();
   });
 });
