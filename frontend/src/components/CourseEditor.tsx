@@ -81,9 +81,23 @@ const DeleteButton = styled(Button)`
   }
 `;
 
-const InfoPanel = styled.div`
+const CourseTypePanel = styled.div`
   position: absolute;
   top: 10px;
+  right: 10px;
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  padding: 0.75rem;
+  min-width: 200px;
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+`;
+
+const InfoPanel = styled.div`
+  position: absolute;
+  top: 80px;
   right: 10px;
   z-index: 1;
   background: rgba(255, 255, 255, 0.9);
@@ -92,6 +106,85 @@ const InfoPanel = styled.div`
   padding: 1rem;
   min-width: 200px;
   font-size: 0.875rem;
+`;
+
+const CourseTypeSelector = styled.div`
+  position: relative;
+  margin-bottom: 0.5rem;
+`;
+
+const CourseTypeButton = styled.button`
+  width: 100%;
+  padding: 8px 12px;
+  background: white;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  &:hover {
+    background: #f8f9fa;
+  }
+`;
+
+const CourseTypeDropdown = styled.div<{ isOpen: boolean }>`
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  z-index: 3;
+  display: ${props => (props.isOpen ? 'block' : 'none')};
+`;
+
+const CourseTypeOption = styled.div<{ disabled?: boolean }>`
+  padding: 8px 12px;
+  cursor: ${props => (props.disabled ? 'not-allowed' : 'pointer')};
+  font-size: 0.875rem;
+  color: ${props => (props.disabled ? '#6c757d' : 'inherit')};
+  position: relative;
+
+  &:hover {
+    background: ${props => (props.disabled ? 'transparent' : '#f8f9fa')};
+  }
+
+  &:not(:last-child) {
+    border-bottom: 1px solid #f0f0f0;
+  }
+`;
+
+const ComingSoonTooltip = styled.div<{ show: boolean }>`
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  margin-bottom: 5px;
+  opacity: ${props => (props.show ? 1 : 0)};
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 4;
+
+  &:before {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 4px solid transparent;
+    border-top-color: rgba(0, 0, 0, 0.8);
+  }
 `;
 
 const Tooltip = styled.div`
@@ -106,6 +199,171 @@ const Tooltip = styled.div`
   text-align: center;
   z-index: 1000;
 `;
+
+// Sun component for outdoor environment
+const Sun: FC = () => {
+  return (
+    <group>
+      {/* Sun sphere */}
+      <mesh position={[30, 40, 20]}>
+        <sphereGeometry args={[3, 16, 16]} />
+        <meshBasicMaterial color='#ffeb3b' />
+      </mesh>
+
+      {/* Sun rays */}
+      {Array.from({ length: 12 }, (_, i) => {
+        const angle = (i / 12) * Math.PI * 2;
+        const x = Math.cos(angle) * 5;
+        const y = Math.sin(angle) * 5;
+        return (
+          <mesh key={i} position={[30 + x, 40, 20 + y]} rotation={[0, 0, angle]}>
+            <cylinderGeometry args={[0.1, 0.1, 2, 8]} />
+            <meshBasicMaterial color='#ffeb3b' />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+};
+
+// Supporting beams component for elevated track points
+interface SupportingBeamsProps {
+  curvePoints: THREE.Vector3[];
+}
+
+const SupportingBeams: FC<SupportingBeamsProps> = ({ curvePoints }) => {
+  return (
+    <group>
+      {curvePoints.map((trackPoint, index) => {
+        // Only place beams every few points to avoid overcrowding and only for elevated sections
+        if (index % 8 !== 0 || trackPoint.z <= 0.5) return null;
+
+        const beamHeight = trackPoint.z;
+        // Beam position: X,Y from track point, Z centered between ground and track
+        const beamPosition = new THREE.Vector3(trackPoint.x, trackPoint.y, beamHeight / 2);
+        // Ground position: X,Y from track point, Z always at ground level (0)
+        const groundPosition = new THREE.Vector3(trackPoint.x, trackPoint.y, 0.2);
+        // Top position: X,Y from track point, Z at track level
+        const topPosition = new THREE.Vector3(trackPoint.x, trackPoint.y, trackPoint.z + 0.1);
+
+        return (
+          <group key={`beam-${index}`}>
+            {/* Main vertical support beam - fixed bottom at ground */}
+            <mesh position={beamPosition}>
+              <cylinderGeometry args={[0.15, 0.15, beamHeight, 8]} />
+              <meshStandardMaterial color='#707070' />
+            </mesh>
+
+            {/* Base foundation - always at ground level */}
+            <mesh position={groundPosition}>
+              <cylinderGeometry args={[0.4, 0.4, 0.4, 8]} />
+              <meshStandardMaterial color='#555555' />
+            </mesh>
+
+            {/* Top connector plate - at track level */}
+            <mesh position={topPosition}>
+              <cylinderGeometry args={[0.25, 0.25, 0.2, 8]} />
+              <meshStandardMaterial color='#606060' />
+            </mesh>
+
+            {/* Cross braces for tall supports */}
+            {beamHeight > 3 && (
+              <>
+                <mesh
+                  position={[trackPoint.x, trackPoint.y, beamHeight * 0.3]}
+                  rotation={[0, 0, Math.PI / 4]}
+                >
+                  <boxGeometry args={[0.5, 0.08, 0.08]} />
+                  <meshStandardMaterial color='#707070' />
+                </mesh>
+                <mesh
+                  position={[trackPoint.x, trackPoint.y, beamHeight * 0.7]}
+                  rotation={[0, 0, -Math.PI / 4]}
+                >
+                  <boxGeometry args={[0.5, 0.08, 0.08]} />
+                  <meshStandardMaterial color='#707070' />
+                </mesh>
+              </>
+            )}
+          </group>
+        );
+      })}
+    </group>
+  );
+};
+
+// Rollercoaster tracks component - parallel rails with ties
+interface RollercoasterTracksProps {
+  curvePoints: THREE.Vector3[];
+}
+
+const RollercoasterTracks: FC<RollercoasterTracksProps> = ({ curvePoints }) => {
+  if (curvePoints.length < 2) return null;
+
+  const tracks = useMemo(() => {
+    const leftRailPoints: THREE.Vector3[] = [];
+    const rightRailPoints: THREE.Vector3[] = [];
+    const tiePositions: THREE.Vector3[] = [];
+
+    const railSpacing = 0.3; // Distance between rails
+
+    for (let i = 0; i < curvePoints.length - 1; i++) {
+      const current = curvePoints[i];
+      const next = curvePoints[i + 1];
+
+      // Calculate direction and perpendicular vector
+      const direction = new THREE.Vector3().subVectors(next, current).normalize();
+      const up = new THREE.Vector3(0, 0, 1);
+      const right = new THREE.Vector3().crossVectors(direction, up).normalize();
+
+      // Create left and right rail points
+      const leftPoint = current.clone().add(right.clone().multiplyScalar(-railSpacing / 2));
+      const rightPoint = current.clone().add(right.clone().multiplyScalar(railSpacing / 2));
+
+      leftRailPoints.push(leftPoint);
+      rightRailPoints.push(rightPoint);
+
+      // Add tie positions every few points
+      if (i % 3 === 0) {
+        tiePositions.push(current.clone());
+      }
+    }
+
+    return { leftRailPoints, rightRailPoints, tiePositions };
+  }, [curvePoints]);
+
+  return (
+    <group>
+      {/* Left rail */}
+      <Line points={tracks.leftRailPoints} color='#8B4513' lineWidth={3} />
+
+      {/* Right rail */}
+      <Line points={tracks.rightRailPoints} color='#8B4513' lineWidth={3} />
+
+      {/* Railroad ties */}
+      {tracks.tiePositions.map((tiePos, index) => {
+        if (index >= curvePoints.length - 1) return null;
+
+        const current = curvePoints[Math.min(index * 3, curvePoints.length - 1)];
+        const next = curvePoints[Math.min(index * 3 + 1, curvePoints.length - 1)];
+        const direction = new THREE.Vector3().subVectors(next, current).normalize();
+        const up = new THREE.Vector3(0, 0, 1);
+        const right = new THREE.Vector3().crossVectors(direction, up).normalize();
+
+        return (
+          <mesh
+            key={`tie-${index}`}
+            position={tiePos}
+            rotation={[0, 0, Math.atan2(right.y, right.x)]}
+          >
+            <boxGeometry args={[0.6, 0.15, 0.08]} />
+            <meshStandardMaterial color='#654321' />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+};
 
 // Axis helper component
 const AxisHelper: FC = () => {
@@ -173,7 +431,16 @@ const ProgressDot: FC<ProgressDotProps> = ({ curve, progress, isVisible }) => {
 
       {/* Direction arrow */}
       <group ref={arrowRef} position={arrowPosition}>
-        <mesh rotation={[0, 0, Math.atan2(direction.z, direction.x)]}>
+        <mesh
+          rotation={[
+            -Math.atan2(
+              direction.y,
+              Math.sqrt(direction.x * direction.x + direction.z * direction.z)
+            ), // Pitch
+            Math.atan2(direction.x, direction.z), // Yaw
+            0, // Roll
+          ]}
+        >
           <coneGeometry args={[0.2, 0.8, 8]} />
           <meshBasicMaterial color='yellow' />
         </mesh>
@@ -585,6 +852,9 @@ const CourseEditor: FC<CourseEditorProps> = ({
   const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
   const [shouldRecenter, setShouldRecenter] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [courseType, setCourseType] = useState('Rollercoaster');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [hoveredOption, setHoveredOption] = useState<string | null>(null);
 
   // State for curve control offsets - one for each segment between consecutive points
   const [localCurveControlOffsets, setLocalCurveControlOffsets] = useState<THREE.Vector3[]>(() => {
@@ -615,6 +885,20 @@ const CourseEditor: FC<CourseEditorProps> = ({
     const newOffsets = [...curveControlOffsets];
     newOffsets[segmentIndex] = newOffset;
     setCurveControlOffsets(newOffsets);
+  };
+
+  const courseTypeOptions = [
+    { label: 'Rollercoaster', value: 'Rollercoaster', disabled: false },
+    { label: 'Flight Path', value: 'Flight Path', disabled: true },
+    { label: 'Road Racing', value: 'Road Racing', disabled: true },
+    { label: 'Boating', value: 'Boating', disabled: true },
+  ];
+
+  const handleCourseTypeSelect = (value: string, disabled: boolean) => {
+    if (!disabled) {
+      setCourseType(value);
+    }
+    setIsDropdownOpen(false);
   };
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -685,6 +969,36 @@ const CourseEditor: FC<CourseEditorProps> = ({
         )}
       </ControlsPanel>
 
+      <CourseTypePanel>
+        <div style={{ marginBottom: '0.5rem' }}>
+          <strong>Course Type:</strong>
+        </div>
+        <CourseTypeSelector>
+          <CourseTypeButton onClick={() => setIsDropdownOpen(!isDropdownOpen)}>
+            <span>{courseType}</span>
+            <span>{isDropdownOpen ? '▲' : '▼'}</span>
+          </CourseTypeButton>
+          <CourseTypeDropdown isOpen={isDropdownOpen}>
+            {courseTypeOptions.map(option => (
+              <CourseTypeOption
+                key={option.value}
+                disabled={option.disabled}
+                onClick={() => handleCourseTypeSelect(option.value, option.disabled)}
+                onMouseEnter={() => setHoveredOption(option.disabled ? option.value : null)}
+                onMouseLeave={() => setHoveredOption(null)}
+              >
+                {option.label}
+                {option.disabled && (
+                  <ComingSoonTooltip show={hoveredOption === option.value}>
+                    Coming soon!
+                  </ComingSoonTooltip>
+                )}
+              </CourseTypeOption>
+            ))}
+          </CourseTypeDropdown>
+        </CourseTypeSelector>
+      </CourseTypePanel>
+
       <InfoPanel>
         <div>
           <strong>Course Info:</strong>
@@ -716,8 +1030,14 @@ const CourseEditor: FC<CourseEditorProps> = ({
 
         <gridHelper args={[50, 50]} />
 
+        {/* Sun for outdoor environment */}
+        <Sun />
+
         {/* Axis helper */}
         <AxisHelper />
+
+        {/* Supporting beams for elevated track points */}
+        <SupportingBeams curvePoints={curvePoints} />
 
         {points.map((pos, i) => (
           <DraggablePoint
@@ -746,10 +1066,11 @@ const CourseEditor: FC<CourseEditorProps> = ({
           />
         ))}
 
-        <Line points={curvePoints} color='red' lineWidth={2} />
+        {/* Realistic rollercoaster tracks instead of simple red line */}
+        <RollercoasterTracks curvePoints={curvePoints} />
 
         {/* Animated progress dot */}
-        <ProgressDot curve={curve} progress={progress} isVisible={isPlaying} />
+        <ProgressDot curve={curve} progress={progress} isVisible={true} />
 
         <CameraController
           points={points}
