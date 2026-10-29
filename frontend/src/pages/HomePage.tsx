@@ -1,436 +1,398 @@
-import React, { useState, useMemo, useEffect, FC } from 'react';
+import React, { useState, useMemo, useEffect, useRef, FC } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from '@emotion/styled';
+import * as THREE from 'three';
 import CourseEditor from '../components/CourseEditor';
 import SpectatorView from '../components/SpectatorView';
 import FirstPersonView from '../components/FirstPersonView';
-import * as THREE from 'three';
+import {
+  computeRideProfile,
+  sampleAt,
+  advance,
+  RideMode,
+  MODE_DEFAULTS,
+} from '../physics/rideProfile';
+import { buildCourseCurve, DEFAULT_POINTS } from '../physics/course';
+import { rememberMode } from '../mode/mode';
+import { bp, useIsDesktop } from '../hooks/useMediaQuery';
 
-const PageContainer = styled.div`
+/* ---------- layout ---------- */
+
+const Studio = styled.div`
   display: flex;
   flex-direction: column;
-  height: 100%;
-  max-height: calc(100vh - 120px); /* Account for header and footer */
-  overflow: hidden;
+  min-height: calc(100dvh - 60px);
+  background: #eef2f7;
+  ${bp.lg} {
+    display: grid;
+    height: calc(100dvh - 60px);
+    grid-template-columns: 2fr 1fr;
+    grid-template-rows: minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      'editor views'
+      'metrics metrics'
+      'controls controls';
+  }
 `;
 
-const MainContent = styled.div`
-  flex: 1;
-  display: flex;
-  min-height: 0; /* Important for flex children to shrink */
-`;
-
-const EditorPanel = styled.div`
-  flex: 3;
-  border: 1px solid #dee2e6;
-  border-radius: 8px;
+const Panel = styled.section`
+  background: #fff;
+  border: 1px solid #dde3ec;
+  border-radius: 12px;
   margin: 0.5rem;
-  padding: 1rem;
-  background: white;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   overflow: hidden;
-`;
-
-const ViewsPanel = styled.div`
-  flex: 1;
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  margin: 0.5rem;
+  min-height: 0;
 `;
 
-const ViewContainer = styled.div`
+const PanelTitle = styled.h2`
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #3a4556;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid #eef1f5;
+`;
+
+const Fill = styled.div`
   flex: 1;
-  border: 1px solid #dee2e6;
-  border-radius: 8px;
-  padding: 1rem;
-  background: white;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  overflow: hidden;
+  min-height: 0;
+  position: relative;
 `;
 
-const MetricsPanel = styled.div`
-  background: #f8f9fa;
-  border: 1px solid #dee2e6;
-  border-radius: 8px;
-  padding: 1rem;
-  margin: 0.5rem;
+const EditorArea = styled(Panel)`
+  grid-area: editor;
+`;
+
+const ViewsArea = styled.div`
+  grid-area: views;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 1rem;
+  grid-template-rows: 1fr 1fr;
+  min-height: 0;
 `;
 
-const MetricCard = styled.div`
-  background: white;
-  border: 1px solid #dee2e6;
-  border-radius: 6px;
-  padding: 0.75rem;
-  text-align: center;
+/* mobile: one view with tabs */
+const MobileStage = styled(Panel)`
+  height: min(62dvh, 560px);
+  ${bp.sm} {
+    height: 60dvh;
+  }
 `;
 
-const MetricValue = styled.div`
-  font-size: 1.5rem;
-  font-weight: bold;
-  color: #007bff;
-  margin-bottom: 0.25rem;
-`;
-
-const MetricLabel = styled.div`
-  font-size: 0.875rem;
-  color: #666;
-`;
-
-const ControlsContainer = styled.div`
-  padding: 1rem;
-  background: #f8f9fa;
-  border-top: 1px solid #dee2e6;
+const Tabs = styled.div`
   display: flex;
-  align-items: center;
-  gap: 1rem;
+  gap: 0.25rem;
+  padding: 0.35rem;
+  border-bottom: 1px solid #eef1f5;
 `;
 
-const Slider = styled.input`
+const Tab = styled.button<{ active: boolean }>`
   flex: 1;
-  height: 8px;
-  border-radius: 4px;
-  background: #ddd;
-  outline: none;
-  -webkit-appearance: none;
+  min-height: 40px;
+  border: 0;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  background: ${p => (p.active ? '#0b1220' : 'transparent')};
+  color: ${p => (p.active ? '#fff' : '#3a4556')};
+`;
 
-  &::-webkit-slider-thumb {
-    appearance: none;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: #007bff;
-    cursor: pointer;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+const Metrics = styled.div`
+  grid-area: metrics;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  display: flex;
+  gap: 0.5rem;
+  padding: 0 0.5rem;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  ${bp.lg} {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    overflow: visible;
   }
+`;
 
-  &::-moz-range-thumb {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: #007bff;
-    cursor: pointer;
-    border: none;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+const Metric = styled.div<{ warn?: boolean }>`
+  flex: 0 0 auto;
+  min-width: 112px;
+  scroll-snap-align: start;
+  background: #fff;
+  border: 1px solid ${p => (p.warn ? '#f0a3a3' : '#dde3ec')};
+  border-radius: 10px;
+  padding: 0.55rem 0.75rem;
+  text-align: center;
+  strong {
+    display: block;
+    font-size: 1.35rem;
+    color: ${p => (p.warn ? '#c0392b' : '#1565c0')};
+    font-variant-numeric: tabular-nums;
   }
+  span {
+    font-size: 0.78rem;
+    color: #5b6678;
+  }
+`;
+
+const Warnings = styled.ul`
+  margin: 0.25rem 0.75rem 0;
+  padding-left: 1.1rem;
+  color: #a5281b;
+  font-size: 0.82rem;
+  grid-column: 1 / -1;
+`;
+
+const Controls = styled.div`
+  grid-area: controls;
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 0.9rem;
+  margin-top: auto;
+  padding: 0.7rem 1rem calc(0.7rem + env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(6px);
+  border-top: 1px solid #dde3ec;
 `;
 
 const PlayButton = styled.button`
-  background: #28a745;
-  color: white;
-  border: none;
-  padding: 12px 24px;
-  border-radius: 8px;
-  cursor: pointer;
+  min-height: 44px;
+  min-width: 96px;
+  padding: 0 1.2rem;
+  border: 0;
+  border-radius: 999px;
+  background: #1f9d55;
+  color: #fff;
+  font-weight: 700;
   font-size: 1rem;
-  font-weight: bold;
-  transition: all 0.2s ease;
-
-  &:hover {
-    background: #1e7e34;
-    transform: translateY(-1px);
-  }
-
+  cursor: pointer;
   &:disabled {
-    background: #6c757d;
-    cursor: not-allowed;
-    transform: none;
+    background: #8a94a6;
   }
 `;
 
-const SpeedControl = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+const SpeedSelect = styled.select`
+  min-height: 44px;
+  border-radius: 8px;
+  border: 1px solid #c9d2df;
+  padding: 0 0.5rem;
+  background: #fff;
 `;
 
-const SpeedButton = styled.button`
-  background: #007bff;
-  color: white;
-  border: none;
-  padding: 6px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.875rem;
-
-  &:hover {
-    background: #0056b3;
-  }
-
-  &.active {
-    background: #dc3545;
-  }
-`;
-
-const SectionTitle = styled.h2`
-  margin: 0 0 1rem 0;
-  color: #333;
-  font-size: 1.25rem;
-  font-weight: 600;
-`;
-
-const SubTitle = styled.h3`
-  margin: 0 0 0.5rem 0;
-  color: #555;
-  font-size: 1rem;
-  font-weight: 500;
+const Scrubber = styled.input`
+  flex: 1 1 160px;
+  min-width: 120px;
+  height: 44px;
+  accent-color: #1565c0;
 `;
 
 const ProgressLabel = styled.span`
-  font-size: 0.875rem;
-  color: #666;
-  min-width: 100px;
+  font-size: 0.85rem;
+  color: #5b6678;
+  font-variant-numeric: tabular-nums;
+  min-width: 3.5rem;
 `;
 
-interface SimulationMetrics {
-  speed: number;
-  gForce: number;
-  verticalG: number;
-  lateralG: number;
-  altitude: number;
-}
+/** round to integer without printing "-0" */
+const fmt0 = (x: number) => (Math.round(x) === 0 ? '0' : x.toFixed(0));
 
-const HomePage: FC = () => {
+type TabKey = 'editor' | 'chase' | 'cockpit';
+
+const HomePage: FC<{ mode: RideMode }> = ({ mode }) => {
   const { t } = useTranslation();
-  const [points, setPoints] = useState<THREE.Vector3[]>([
-    new THREE.Vector3(-6, 2, 0), // Start point (above ground)
-    new THREE.Vector3(-2, 4, 3), // High point with curve
-    new THREE.Vector3(0, 2, 5), // Mid height
-    new THREE.Vector3(3, 6, 2), // Peak point
-    new THREE.Vector3(8, 1, 0), // End point (different from start, above ground)
-  ]);
+  const isDesktop = useIsDesktop();
+  const [tab, setTab] = useState<TabKey>('editor');
 
-  // State for curve control offsets - one for each segment between consecutive points
-  const [curveControlOffsets, setCurveControlOffsets] = useState<THREE.Vector3[]>(() => {
-    return Array(Math.max(0, points.length - 1))
+  const [points, setPoints] = useState<THREE.Vector3[]>(() => DEFAULT_POINTS[mode]());
+  const [curveControlOffsets, setCurveControlOffsets] = useState<THREE.Vector3[]>(() =>
+    Array(points.length - 1)
       .fill(null)
-      .map(() => new THREE.Vector3(0, 0, 0));
-  });
-  const [progress, setProgress] = useState<number>(0); // 0 to 1
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
-  const [metrics, setMetrics] = useState<SimulationMetrics>({
-    speed: 0,
-    gForce: 0,
-    verticalG: 0,
-    lateralG: 0,
-    altitude: 0,
-  });
+      .map(() => new THREE.Vector3())
+  );
+  const [progress, setProgress] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
 
-  // Function to generate curve points with control offsets
-  const generateCurvePointsWithControls = (
-    points: THREE.Vector3[],
-    controlOffsets: THREE.Vector3[],
-    divisions: number = 50
-  ): THREE.Vector3[] => {
-    if (points.length < 2) return [];
-
-    const curvePoints: THREE.Vector3[] = [];
-
-    for (let i = 0; i < points.length - 1; i++) {
-      const startPoint = points[i];
-      const endPoint = points[i + 1];
-      const controlOffset = controlOffsets[i] || new THREE.Vector3(0, 0, 0);
-
-      // Calculate the midpoint and control point
-      const midPoint = new THREE.Vector3().addVectors(startPoint, endPoint).multiplyScalar(0.5);
-      const controlPoint = midPoint.clone().add(controlOffset);
-
-      // Create a quadratic bezier curve for this segment
-      const segmentCurve = new THREE.QuadraticBezierCurve3(startPoint, controlPoint, endPoint);
-      const segmentPoints = segmentCurve.getPoints(Math.ceil(divisions / (points.length - 1)));
-
-      // Add points (avoid duplicating the end point except for the last segment)
-      if (i === 0) {
-        curvePoints.push(...segmentPoints);
-      } else {
-        curvePoints.push(...segmentPoints.slice(1));
-      }
-    }
-
-    return curvePoints;
-  };
-
-  const curve = useMemo(() => new THREE.CatmullRomCurve3(points, true), [points]);
-
-  // Create custom curve with control offsets
-  const customCurvePoints = useMemo(() => {
-    return generateCurvePointsWithControls(points, curveControlOffsets, 100);
-  }, [points, curveControlOffsets]);
-
-  const customCurve = useMemo(() => {
-    if (customCurvePoints.length > 0) {
-      return new THREE.CatmullRomCurve3(customCurvePoints, false);
-    }
-    return curve;
-  }, [customCurvePoints, curve]);
-
-  // Calculate physics metrics based on current position
+  // reset course when switching mode
   useEffect(() => {
-    if (!customCurve || points.length < 2) return;
+    rememberMode(mode);
+    const p = DEFAULT_POINTS[mode]();
+    setPoints(p);
+    setCurveControlOffsets(p.slice(1).map(() => new THREE.Vector3()));
+    setProgress(0);
+    setIsPlaying(false);
+  }, [mode]);
 
-    const currentPoint = customCurve.getPointAt(progress);
-    const prevPoint = customCurve.getPointAt(Math.max(progress - 0.01, 0));
-    const nextPoint = customCurve.getPointAt(Math.min(progress + 0.01, 1));
-
-    // Calculate velocity and acceleration
-    const velocity = new THREE.Vector3().subVectors(nextPoint, prevPoint);
-    const speed = velocity.length() * 50; // Scale for realistic speed (m/s)
-
-    // Calculate acceleration (change in velocity)
-    const prevVelocity = new THREE.Vector3().subVectors(currentPoint, prevPoint);
-    const acceleration = new THREE.Vector3().subVectors(velocity, prevVelocity);
-
-    // Calculate G-forces
-    const totalG = acceleration.length() * 10; // Scale for G-force
-    const verticalG = Math.abs(acceleration.y) * 10;
-    const lateralG =
-      Math.sqrt(acceleration.x * acceleration.x + acceleration.z * acceleration.z) * 10;
-
-    setMetrics({
-      speed: speed,
-      gForce: totalG,
-      verticalG: verticalG,
-      lateralG: lateralG,
-      altitude: currentPoint.y,
-    });
-  }, [progress, customCurve, points]);
-
-  // Auto-play functionality
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isPlaying) {
-      interval = setInterval(() => {
-        setProgress(prev => {
-          const newProgress = prev + 0.002 * playbackSpeed;
-          if (newProgress >= 1) {
-            setIsPlaying(false);
-            return 1;
-          }
-          return newProgress;
-        });
-      }, 16); // ~60fps
-    }
-    return () => clearInterval(interval);
-  }, [isPlaying, playbackSpeed]);
-
-  // Update curve control offsets when points change
-  useEffect(() => {
-    setCurveControlOffsets(prev => {
-      const newOffsets = Array(Math.max(0, points.length - 1))
+    setCurveControlOffsets(prev =>
+      Array(Math.max(0, points.length - 1))
         .fill(null)
-        .map(() => new THREE.Vector3(0, 0, 0));
-      // Copy existing offsets if they exist
-      for (let i = 0; i < Math.min(prev.length, newOffsets.length); i++) {
-        newOffsets[i] = prev[i].clone();
-      }
-      return newOffsets;
-    });
+        .map((_, i) => (prev[i] ? prev[i].clone() : new THREE.Vector3()))
+    );
   }, [points.length]);
 
-  const handlePlayPause = () => {
-    if (progress >= 1) {
-      setProgress(0);
-    }
-    setIsPlaying(!isPlaying);
+  const customCurve = useMemo(
+    () => buildCourseCurve(points, curveControlOffsets),
+    [points, curveControlOffsets]
+  );
+
+  const profile = useMemo(() => computeRideProfile(customCurve, { mode }), [customCurve, mode]);
+  const m = sampleAt(profile, progress);
+
+  // time-based playback: advance by v·dt along the real arc length
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
+  useEffect(() => {
+    if (!isPlaying) return;
+    let raf = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      const dt = Math.min((now - last) / 1000, 0.1) * playbackSpeed;
+      last = now;
+      setProgress(u => {
+        const next = advance(profileRef.current, u, dt);
+        if (next >= 1) setIsPlaying(false);
+        return next;
+      });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [isPlaying, playbackSpeed]);
+
+  const togglePlay = () => {
+    if (progress >= 1) setProgress(0);
+    setIsPlaying(p => !p);
   };
 
-  const handleSpeedChange = (speed: number) => {
-    setPlaybackSpeed(speed);
-  };
+  const scale = MODE_DEFAULTS[mode].scale;
+  const metricCards =
+    mode === 'flight'
+      ? [
+          { v: (m.speed * 1.944).toFixed(0), l: `${t('airspeed')} (kt)` },
+          { v: m.normalG.toFixed(2), l: `${t('load_factor')} (G)`, warn: m.normalG > 4 },
+          { v: `${fmt0(m.bankDeg)}°`, l: t('bank') },
+          { v: `${fmt0(m.pitchDeg)}°`, l: t('pitch') },
+          { v: (m.altitude * 3.281).toFixed(0), l: `${t('altitude')} (ft)` },
+        ]
+      : [
+          { v: m.speed.toFixed(1), l: `${t('speed')} (m/s)` },
+          { v: m.seatG.toFixed(2), l: t('vertical_g'), warn: m.seatG > 5 || m.seatG < -1.5 },
+          {
+            v: (Math.abs(m.sideG) < 0.005 ? 0 : m.sideG).toFixed(2),
+            l: t('lateral_g'),
+            warn: Math.abs(m.sideG) > 1.8,
+          },
+          { v: `${fmt0(m.bankDeg)}°`, l: t('bank') },
+          { v: m.altitude.toFixed(1), l: `${t('altitude')} (m)` },
+        ];
 
-  const handleProgressChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newProgress = parseFloat(e.target.value);
-    setProgress(newProgress);
-    if (isPlaying && newProgress >= 1) {
-      setIsPlaying(false);
-    }
-  };
+  const editor = (
+    <CourseEditor
+      mode={mode}
+      points={points}
+      setPoints={setPoints}
+      curve={customCurve}
+      progress={progress}
+      curveControlOffsets={curveControlOffsets}
+      setCurveControlOffsets={setCurveControlOffsets}
+      scaleLabel={`1 unit = ${scale} m`}
+      compact={!isDesktop}
+    />
+  );
+  const chase = <SpectatorView curve={customCurve} progress={progress} />;
+  const cockpit = <FirstPersonView curve={customCurve} progress={progress} />;
 
   return (
-    <PageContainer>
-      <MainContent>
-        <EditorPanel>
-          <SectionTitle>{t('course_editor')}</SectionTitle>
-          <CourseEditor
-            points={points}
-            setPoints={setPoints}
-            curve={customCurve}
-            onPlay={handlePlayPause}
-            isPlaying={isPlaying}
-            progress={progress}
-            curveControlOffsets={curveControlOffsets}
-            setCurveControlOffsets={setCurveControlOffsets}
-          />
-        </EditorPanel>
-        <ViewsPanel>
-          <ViewContainer>
-            <SubTitle>{t('spectator_view')}</SubTitle>
-            <SpectatorView curve={customCurve} progress={progress} />
-          </ViewContainer>
-          <ViewContainer>
-            <SubTitle>{t('fpv')}</SubTitle>
-            <FirstPersonView curve={customCurve} progress={progress} />
-          </ViewContainer>
-        </ViewsPanel>
-      </MainContent>
+    <Studio data-mode={mode}>
+      {isDesktop ? (
+        <>
+          <EditorArea>
+            <PanelTitle>{t('course_editor')}</PanelTitle>
+            <Fill>{editor}</Fill>
+          </EditorArea>
+          <ViewsArea>
+            <Panel>
+              <PanelTitle>{t('spectator_view')}</PanelTitle>
+              <Fill>{chase}</Fill>
+            </Panel>
+            <Panel>
+              <PanelTitle>{t('fpv')}</PanelTitle>
+              <Fill>{cockpit}</Fill>
+            </Panel>
+          </ViewsArea>
+        </>
+      ) : (
+        <MobileStage>
+          <Tabs role='tablist'>
+            {(['editor', 'chase', 'cockpit'] as TabKey[]).map(k => (
+              <Tab
+                key={k}
+                role='tab'
+                aria-selected={tab === k}
+                active={tab === k}
+                onClick={() => setTab(k)}
+              >
+                {t(k === 'cockpit' && mode === 'coaster' ? 'tab_ride' : `tab_${k}`)}
+              </Tab>
+            ))}
+          </Tabs>
+          {/* only the active view is mounted: one WebGL context on phones instead of four */}
+          <Fill>{tab === 'editor' ? editor : tab === 'chase' ? chase : cockpit}</Fill>
+        </MobileStage>
+      )}
 
-      <MetricsPanel>
-        <MetricCard>
-          <MetricValue>{metrics.speed.toFixed(1)}</MetricValue>
-          <MetricLabel>Speed (m/s)</MetricLabel>
-        </MetricCard>
-        <MetricCard>
-          <MetricValue>{metrics.gForce.toFixed(2)}</MetricValue>
-          <MetricLabel>Total G-Force</MetricLabel>
-        </MetricCard>
-        <MetricCard>
-          <MetricValue>{metrics.verticalG.toFixed(2)}</MetricValue>
-          <MetricLabel>Vertical G</MetricLabel>
-        </MetricCard>
-        <MetricCard>
-          <MetricValue>{metrics.lateralG.toFixed(2)}</MetricValue>
-          <MetricLabel>Lateral G</MetricLabel>
-        </MetricCard>
-        <MetricCard>
-          <MetricValue>{metrics.altitude.toFixed(1)}</MetricValue>
-          <MetricLabel>Altitude (m)</MetricLabel>
-        </MetricCard>
-      </MetricsPanel>
+      <Metrics>
+        {metricCards.map(c => (
+          <Metric key={c.l} warn={c.warn}>
+            <strong>{c.v}</strong>
+            <span>{c.l}</span>
+          </Metric>
+        ))}
+        {profile.warnings.length > 0 && (
+          <Warnings>
+            {profile.warnings.map(w => (
+              <li key={w}>{w}</li>
+            ))}
+          </Warnings>
+        )}
+      </Metrics>
 
-      <ControlsContainer>
-        <PlayButton onClick={handlePlayPause} disabled={points.length < 2}>
-          {isPlaying ? t('pause') : t('play')}
+      <Controls>
+        <PlayButton onClick={togglePlay} disabled={points.length < 2}>
+          {isPlaying ? t('pause') : mode === 'flight' ? t('cta_fly') : t('cta_ride')}
         </PlayButton>
-
-        <SpeedControl>
-          <span>Speed:</span>
-          {[0.5, 1, 2, 4].map(speed => (
-            <SpeedButton
-              key={speed}
-              className={playbackSpeed === speed ? 'active' : ''}
-              onClick={() => handleSpeedChange(speed)}
-            >
-              {speed}x
-            </SpeedButton>
+        <SpeedSelect
+          aria-label={t('speed')}
+          value={playbackSpeed}
+          onChange={e => setPlaybackSpeed(parseFloat(e.target.value))}
+        >
+          {[0.5, 1, 2, 4].map(s => (
+            <option key={s} value={s}>
+              {s}x
+            </option>
           ))}
-        </SpeedControl>
-
-        <ProgressLabel>Progress: {Math.round(progress * 100)}%</ProgressLabel>
-
-        <Slider
+        </SpeedSelect>
+        <ProgressLabel>
+          {m.t.toFixed(0)}s / {profile.duration.toFixed(0)}s
+        </ProgressLabel>
+        <Scrubber
           type='range'
+          aria-label={t('progress')}
           min='0'
           max='1'
           step='0.001'
           value={progress}
-          onChange={handleProgressChange}
+          onChange={e => setProgress(parseFloat(e.target.value))}
         />
-      </ControlsContainer>
-    </PageContainer>
+      </Controls>
+    </Studio>
   );
 };
 

@@ -38,7 +38,7 @@ const AppContainer = styled.div`
 
 const Main = styled.main`
   flex: 1;
-  overflow-x: hidden;
+  overflow-x: clip;
 `;
 
 const Footer = styled.footer`
@@ -67,7 +67,7 @@ const App: React.FC = () => {
           <Outlet />
         </Main>
         <Footer>
-          <FooterContent>© 2025 Needham. All rights reserved.</FooterContent>
+          <FooterContent>© {new Date().getFullYear()} Needham. All rights reserved.</FooterContent>
         </Footer>
       </AppContainer>
     </>
