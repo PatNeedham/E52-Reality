@@ -1,92 +1,204 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, NavLink as RouterNavLink, useLocation, useNavigate } from 'react-router-dom';
 import styled from '@emotion/styled';
+import { MODE_PATH, rememberMode, useMode } from '../mode/mode';
+import type { RideMode } from '../physics/rideProfile';
+import { bp } from '../hooks/useMediaQuery';
 
 const HeaderContainer = styled.header`
-  padding: 1rem;
-  background-color: #282c34;
-  color: white;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-`;
-
-const Logo = styled.h1`
-  cursor: pointer;
-  font-size: 1.5rem;
-  font-weight: bold;
-  margin: 0;
-  transition: color 0.3s ease;
-
-  &:hover {
-    color: #61dafb;
-  }
-`;
-
-const Nav = styled.nav`
+  position: sticky;
+  top: 0;
+  z-index: 50;
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  padding-top: calc(0.5rem + env(safe-area-inset-top));
+  background: #0b1220;
+  color: #fff;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08);
 `;
 
-const NavLink = styled(Link)`
-  color: white;
+const Wordmark = styled(Link)`
+  color: #fff;
   text-decoration: none;
-  padding: 0.5rem 1rem;
-  border-radius: 4px;
-  transition: background-color 0.3s ease;
-
-  &:hover {
-    background-color: rgba(255, 255, 255, 0.1);
+  font-weight: 800;
+  font-size: 1.25rem;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  span {
+    color: #7cc4ff;
+    font-weight: 500;
+    display: none;
+    ${bp.sm} {
+      display: inline;
+    }
   }
 `;
 
-const LanguageControls = styled.div`
-  display: flex;
-  gap: 0.5rem;
+const Segmented = styled.div`
+  display: inline-flex;
+  margin-left: auto;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  ${bp.lg} {
+    margin-left: 1.5rem;
+  }
 `;
 
-const LanguageButton = styled.button`
-  background: rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: white;
-  padding: 0.5rem 1rem;
-  border-radius: 4px;
-  cursor: pointer;
+const SegButton = styled.button<{ active: boolean }>`
+  min-height: 36px;
+  padding: 0 0.85rem;
+  border: 0;
+  border-radius: 999px;
   font-size: 0.875rem;
-  transition: all 0.3s ease;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  color: ${p => (p.active ? '#0b1220' : '#d6e2f5')};
+  background: ${p => (p.active ? '#fff' : 'transparent')};
+  transition: background 0.2s ease;
+`;
 
-  &:hover {
-    background: rgba(255, 255, 255, 0.3);
-    transform: translateY(-1px);
+const DesktopNav = styled.nav`
+  display: none;
+  ${bp.lg} {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-left: auto;
   }
+`;
 
-  &:active {
-    transform: translateY(0);
+const NavItem = styled(RouterNavLink)`
+  color: #d6e2f5;
+  text-decoration: none;
+  padding: 0.5rem 0.85rem;
+  border-radius: 6px;
+  &:hover,
+  &.active {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+  }
+`;
+
+const LangSelect = styled.select`
+  min-height: 36px;
+  padding: 0 0.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: transparent;
+  color: #fff;
+  option {
+    color: #000;
+  }
+`;
+
+const MenuButton = styled.button`
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 1.25rem;
+  cursor: pointer;
+  ${bp.lg} {
+    display: none;
+  }
+`;
+
+const Drawer = styled.div<{ open: boolean }>`
+  display: ${p => (p.open ? 'flex' : 'none')};
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 1rem 1rem;
+  background: #0b1220;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  a {
+    padding: 0.85rem 0.5rem;
+  }
+  ${bp.lg} {
+    display: none;
   }
 `;
 
 const Header: React.FC = () => {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const mode = useMode();
+  const [open, setOpen] = useState(false);
 
-  const changeLanguage = (lng: string) => {
-    i18n.changeLanguage(lng);
+  useEffect(() => setOpen(false), [pathname]);
+
+  const switchMode = (m: RideMode) => {
+    rememberMode(m);
+    // On a studio page swap studios; on other pages stay put but remember the choice.
+    if (pathname === '/' || pathname.startsWith('/fly') || pathname.startsWith('/coaster')) {
+      navigate(MODE_PATH[m]);
+    }
   };
+
+  const lang = (i18n.resolvedLanguage || i18n.language || 'en').slice(0, 2);
+  const langSelect = (
+    <LangSelect
+      aria-label={t('language')}
+      value={lang}
+      onChange={e => i18n.changeLanguage(e.target.value)}
+    >
+      <option value='en'>EN</option>
+      <option value='es'>ES</option>
+    </LangSelect>
+  );
 
   return (
     <HeaderContainer>
-      <Logo onClick={() => navigate('/')}>{t('welcome')}</Logo>
-      <Nav>
-        <NavLink to='/library'>{t('my_library')}</NavLink>
-        <NavLink to='/discover'>{t('discover')}</NavLink>
-      </Nav>
-      <LanguageControls>
-        <LanguageButton onClick={() => changeLanguage('en')}>{t('english')}</LanguageButton>
-        <LanguageButton onClick={() => changeLanguage('es')}>{t('spanish')}</LanguageButton>
-      </LanguageControls>
+      <Wordmark to='/' aria-label='E52 Reality home'>
+        E52 <span>Reality</span>
+      </Wordmark>
+
+      <Segmented role='tablist' aria-label={t('mode')}>
+        <SegButton
+          role='tab'
+          aria-selected={mode === 'flight'}
+          active={mode === 'flight'}
+          onClick={() => switchMode('flight')}
+        >
+          ✈ {t('mode_flight')}
+        </SegButton>
+        <SegButton
+          role='tab'
+          aria-selected={mode === 'coaster'}
+          active={mode === 'coaster'}
+          onClick={() => switchMode('coaster')}
+        >
+          🎢 {t('mode_coaster')}
+        </SegButton>
+      </Segmented>
+
+      <DesktopNav>
+        <NavItem to={MODE_PATH[mode]}>{t('studio')}</NavItem>
+        <NavItem to='/library'>{t('my_library')}</NavItem>
+        <NavItem to='/discover'>{t('discover')}</NavItem>
+        {langSelect}
+      </DesktopNav>
+
+      <MenuButton aria-label={t('menu')} aria-expanded={open} onClick={() => setOpen(o => !o)}>
+        {open ? '✕' : '☰'}
+      </MenuButton>
+      <Drawer open={open}>
+        <NavItem to={MODE_PATH[mode]}>{t('studio')}</NavItem>
+        <NavItem to='/library'>{t('my_library')}</NavItem>
+        <NavItem to='/discover'>{t('discover')}</NavItem>
+        <div>{langSelect}</div>
+      </Drawer>
     </HeaderContainer>
   );
 };

@@ -5,6 +5,7 @@ import './services/opentelemetry';
 import './i18n/config';
 import App from './App';
 import HomePage from './pages/HomePage';
+import Landing from './pages/Landing';
 import MyLibrary from './pages/MyLibrary';
 import CourseHistory from './pages/CourseHistory';
 import Discover from './pages/Discover';
@@ -16,7 +17,15 @@ const router = createBrowserRouter([
     children: [
       {
         index: true,
-        element: <HomePage />,
+        element: <Landing />,
+      },
+      {
+        path: 'fly',
+        element: <HomePage mode='flight' />,
+      },
+      {
+        path: 'coaster',
+        element: <HomePage mode='coaster' />,
       },
       {
         path: 'library',

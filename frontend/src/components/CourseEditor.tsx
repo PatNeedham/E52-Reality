@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useMemo, FC } from 'react';
+import React, { useRef, useState, useEffect, useMemo, FC, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Canvas, ThreeEvent, useThree } from '@react-three/fiber';
 import { OrbitControls, Line, Sphere, Text, Html } from '@react-three/drei';
@@ -10,15 +10,40 @@ const EditorContainer = styled.div`
   position: relative;
 `;
 
-const ControlsPanel = styled.div`
+const ControlsPanel = styled.div<{ compact?: boolean }>`
   position: absolute;
   top: 10px;
   left: 10px;
+  right: ${p => (p.compact ? '10px' : 'auto')};
   z-index: 1;
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  button {
+    min-height: ${p => (p.compact ? '40px' : 'auto')};
+  }
 `;
+
+const FlightPath: FC<{ curvePoints: THREE.Vector3[] }> = ({ curvePoints }) =>
+  curvePoints.length > 1 ? (
+    <>
+      <Line points={curvePoints} color='#1e88e5' lineWidth={4} />
+      {/* faint drop-lines to the ground help read altitude */}
+      {curvePoints
+        .filter((_, i) => i % 8 === 0)
+        .map((p, i) => (
+          <Line
+            key={i}
+            points={[p, new THREE.Vector3(p.x, 0, p.z)]}
+            color='#90caf9'
+            lineWidth={1}
+            dashed
+            dashSize={0.2}
+            gapSize={0.2}
+          />
+        ))}
+    </>
+  ) : null;
 
 const Button = styled.button`
   background: #007bff;
@@ -43,15 +68,6 @@ const Button = styled.button`
     background: #6c757d;
     cursor: not-allowed;
     transform: none;
-  }
-`;
-
-const PlayButton = styled(Button)`
-  background: #28a745;
-  font-weight: bold;
-
-  &:hover {
-    background: #1e7e34;
   }
 `;
 
@@ -81,23 +97,10 @@ const DeleteButton = styled(Button)`
   }
 `;
 
-const CourseTypePanel = styled.div`
+const InfoPanel = styled.div<{ compact?: boolean }>`
+  display: ${p => (p.compact ? 'none' : 'block')};
   position: absolute;
   top: 10px;
-  right: 10px;
-  z-index: 2;
-  background: rgba(255, 255, 255, 0.95);
-  border: 1px solid #dee2e6;
-  border-radius: 8px;
-  padding: 0.75rem;
-  min-width: 200px;
-  font-size: 0.875rem;
-  margin-bottom: 0.5rem;
-`;
-
-const InfoPanel = styled.div`
-  position: absolute;
-  top: 80px;
   right: 10px;
   z-index: 1;
   background: rgba(255, 255, 255, 0.9);
@@ -106,85 +109,6 @@ const InfoPanel = styled.div`
   padding: 1rem;
   min-width: 200px;
   font-size: 0.875rem;
-`;
-
-const CourseTypeSelector = styled.div`
-  position: relative;
-  margin-bottom: 0.5rem;
-`;
-
-const CourseTypeButton = styled.button`
-  width: 100%;
-  padding: 8px 12px;
-  background: white;
-  border: 1px solid #dee2e6;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.875rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-
-  &:hover {
-    background: #f8f9fa;
-  }
-`;
-
-const CourseTypeDropdown = styled.div<{ isOpen: boolean }>`
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  background: white;
-  border: 1px solid #dee2e6;
-  border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  z-index: 3;
-  display: ${props => (props.isOpen ? 'block' : 'none')};
-`;
-
-const CourseTypeOption = styled.div<{ disabled?: boolean }>`
-  padding: 8px 12px;
-  cursor: ${props => (props.disabled ? 'not-allowed' : 'pointer')};
-  font-size: 0.875rem;
-  color: ${props => (props.disabled ? '#6c757d' : 'inherit')};
-  position: relative;
-
-  &:hover {
-    background: ${props => (props.disabled ? 'transparent' : '#f8f9fa')};
-  }
-
-  &:not(:last-child) {
-    border-bottom: 1px solid #f0f0f0;
-  }
-`;
-
-const ComingSoonTooltip = styled.div<{ show: boolean }>`
-  position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.8);
-  color: white;
-  padding: 6px 10px;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  white-space: nowrap;
-  margin-bottom: 5px;
-  opacity: ${props => (props.show ? 1 : 0)};
-  pointer-events: none;
-  transition: opacity 0.2s ease;
-  z-index: 4;
-
-  &:before {
-    content: '';
-    position: absolute;
-    top: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    border: 4px solid transparent;
-    border-top-color: rgba(0, 0, 0, 0.8);
-  }
 `;
 
 const Tooltip = styled.div`
@@ -757,6 +681,9 @@ interface CourseEditorProps {
   progress?: number;
   curveControlOffsets?: THREE.Vector3[];
   setCurveControlOffsets?: React.Dispatch<React.SetStateAction<THREE.Vector3[]>>;
+  mode?: 'flight' | 'coaster';
+  scaleLabel?: string;
+  compact?: boolean;
 }
 
 // Component to handle camera controls and re-centering
@@ -783,7 +710,9 @@ const CameraController: FC<{
       const maxDim = Math.max(size.x, size.y, size.z);
 
       // Set camera position to frame all points with some padding
-      const distance = maxDim * 2.5; // Add padding
+      // camera sits on the (1,1,1) diagonal: |offset| = d·√3 ≈ 1.05·maxDim,
+      // which fits the course in a 75° FOV with a little padding
+      const distance = Math.max(maxDim * 0.6, 3);
       camera.position.set(center.x + distance, center.y + distance, center.z + distance);
 
       // Set the controls target to the center of the points
@@ -804,57 +733,21 @@ const CameraController: FC<{
   );
 };
 
-// Function to generate curve points with control offsets
-const generateCurvePointsWithControls = (
-  points: THREE.Vector3[],
-  controlOffsets: THREE.Vector3[],
-  divisions: number = 50
-): THREE.Vector3[] => {
-  if (points.length < 2) return [];
-
-  const curvePoints: THREE.Vector3[] = [];
-
-  for (let i = 0; i < points.length - 1; i++) {
-    const startPoint = points[i];
-    const endPoint = points[i + 1];
-    const controlOffset = controlOffsets[i] || new THREE.Vector3(0, 0, 0);
-
-    // Calculate the midpoint and control point
-    const midPoint = new THREE.Vector3().addVectors(startPoint, endPoint).multiplyScalar(0.5);
-    const controlPoint = midPoint.clone().add(controlOffset);
-
-    // Create a quadratic bezier curve for this segment
-    const segmentCurve = new THREE.QuadraticBezierCurve3(startPoint, controlPoint, endPoint);
-    const segmentPoints = segmentCurve.getPoints(divisions / (points.length - 1));
-
-    // Add points (avoid duplicating the end point except for the last segment)
-    if (i === 0) {
-      curvePoints.push(...segmentPoints);
-    } else {
-      curvePoints.push(...segmentPoints.slice(1));
-    }
-  }
-
-  return curvePoints;
-};
-
 const CourseEditor: FC<CourseEditorProps> = ({
   points,
   setPoints,
   curve,
-  onPlay,
-  isPlaying = false,
   progress = 0,
   curveControlOffsets: propCurveControlOffsets,
   setCurveControlOffsets: setPropCurveControlOffsets,
+  mode = 'coaster',
+  scaleLabel = '1 unit = 1 m',
+  compact = false,
 }) => {
   const { t } = useTranslation();
   const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
-  const [shouldRecenter, setShouldRecenter] = useState(false);
+  const [shouldRecenter, setShouldRecenter] = useState(true); // frame the course on load
   const [isDragging, setIsDragging] = useState(false);
-  const [courseType, setCourseType] = useState('Rollercoaster');
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [hoveredOption, setHoveredOption] = useState<string | null>(null);
 
   // State for curve control offsets - one for each segment between consecutive points
   const [localCurveControlOffsets, setLocalCurveControlOffsets] = useState<THREE.Vector3[]>(() => {
@@ -887,19 +780,6 @@ const CourseEditor: FC<CourseEditorProps> = ({
     setCurveControlOffsets(newOffsets);
   };
 
-  const courseTypeOptions = [
-    { label: 'Rollercoaster', value: 'Rollercoaster', disabled: false },
-    { label: 'Flight Path', value: 'Flight Path', disabled: true },
-    { label: 'Road Racing', value: 'Road Racing', disabled: true },
-    { label: 'Boating', value: 'Boating', disabled: true },
-  ];
-
-  const handleCourseTypeSelect = (value: string, disabled: boolean) => {
-    if (!disabled) {
-      setCourseType(value);
-    }
-    setIsDropdownOpen(false);
-  };
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Delete' || event.key === 'Backspace') {
@@ -916,17 +796,18 @@ const CourseEditor: FC<CourseEditorProps> = ({
 
   const handlePointDrag = (newPosition: THREE.Vector3, index: number) => {
     const newPoints = [...points];
-    // Prevent points from going below ground (negative Z)
-    newPosition.z = Math.max(0, newPosition.z);
+    // Prevent points from going below ground (Y is up in this scene)
+    newPosition.y = Math.max(0, newPosition.y);
     newPoints[index] = newPosition;
     setPoints(newPoints);
   };
 
   const handleAddPoint = () => {
     const lastPoint = points[points.length - 1] || new THREE.Vector3(0, 0, 0);
-    // Ensure new points are at least at ground level
-    const newZ = Math.max(0, lastPoint.z);
-    setPoints([...points, new THREE.Vector3(lastPoint.x + 2, lastPoint.y, newZ)]);
+    setPoints([
+      ...points,
+      new THREE.Vector3(lastPoint.x + 2, Math.max(0, lastPoint.y), lastPoint.z),
+    ]);
   };
 
   const handleRemovePoint = () => {
@@ -937,6 +818,12 @@ const CourseEditor: FC<CourseEditorProps> = ({
     }
   };
 
+  // re-frame whenever the course is replaced (e.g. switching Flight/Coaster)
+  const firstPoint = points[0];
+  useEffect(() => {
+    setShouldRecenter(true);
+  }, [mode, firstPoint]);
+
   const handleRecenterView = () => {
     setShouldRecenter(true);
   };
@@ -946,9 +833,8 @@ const CourseEditor: FC<CourseEditorProps> = ({
   };
 
   // Generate curve points with control offsets
-  const curvePoints = useMemo(() => {
-    return generateCurvePointsWithControls(points, curveControlOffsets, 50);
-  }, [points, curveControlOffsets]);
+  // Render exactly the curve the physics uses (no separate approximation)
+  const curvePoints = useMemo(() => curve.getSpacedPoints(160), [curve]);
 
   // Calculate course statistics
   const courseLength = curve.getLength();
@@ -956,56 +842,21 @@ const CourseEditor: FC<CourseEditorProps> = ({
 
   return (
     <EditorContainer>
-      <ControlsPanel>
+      <ControlsPanel compact={compact}>
         <Button onClick={handleAddPoint}>{t('add_point')}</Button>
         <RemoveButton onClick={handleRemovePoint} disabled={selectedPointIndex === null}>
           {t('remove_selected')}
         </RemoveButton>
         <RecenterButton onClick={handleRecenterView}>{t('re_center_view')}</RecenterButton>
-        {onPlay && (
-          <PlayButton onClick={onPlay} disabled={isPlaying}>
-            {isPlaying ? t('pause') : t('play')}
-          </PlayButton>
-        )}
       </ControlsPanel>
 
-      <CourseTypePanel>
-        <div style={{ marginBottom: '0.5rem' }}>
-          <strong>Course Type:</strong>
-        </div>
-        <CourseTypeSelector>
-          <CourseTypeButton onClick={() => setIsDropdownOpen(!isDropdownOpen)}>
-            <span>{courseType}</span>
-            <span>{isDropdownOpen ? '▲' : '▼'}</span>
-          </CourseTypeButton>
-          <CourseTypeDropdown isOpen={isDropdownOpen}>
-            {courseTypeOptions.map(option => (
-              <CourseTypeOption
-                key={option.value}
-                disabled={option.disabled}
-                onClick={() => handleCourseTypeSelect(option.value, option.disabled)}
-                onMouseEnter={() => setHoveredOption(option.disabled ? option.value : null)}
-                onMouseLeave={() => setHoveredOption(null)}
-              >
-                {option.label}
-                {option.disabled && (
-                  <ComingSoonTooltip show={hoveredOption === option.value}>
-                    Coming soon!
-                  </ComingSoonTooltip>
-                )}
-              </CourseTypeOption>
-            ))}
-          </CourseTypeDropdown>
-        </CourseTypeSelector>
-      </CourseTypePanel>
-
-      <InfoPanel>
+      <InfoPanel compact={compact}>
         <div>
           <strong>Course Info:</strong>
         </div>
         <div>Points: {points.length}</div>
-        <div>Length: {courseLength.toFixed(2)}m</div>
-        <div>Grid Scale: 1 unit = 1m</div>
+        <div>Length: {(courseLength * (mode === 'flight' ? 100 : 1)).toFixed(0)} m</div>
+        <div>Grid Scale: {scaleLabel}</div>
         {selectedPoint && (
           <div>
             <br />
@@ -1018,7 +869,8 @@ const CourseEditor: FC<CourseEditorProps> = ({
         )}
       </InfoPanel>
 
-      <Canvas camera={{ position: [10, 10, 10], fov: 75 }}>
+      <Canvas camera={{ position: [10, 10, 10], fov: 75 }} dpr={[1, 2]}>
+        {mode === 'flight' && <color attach='background' args={['#cfe6fb']} />}
         <ambientLight intensity={0.5} />
         <pointLight position={[10, 10, 10]} />
 
@@ -1034,10 +886,14 @@ const CourseEditor: FC<CourseEditorProps> = ({
         <Sun />
 
         {/* Axis helper */}
-        <AxisHelper />
+        {/* Axis labels load a font; keep that suspension inside the canvas so the
+            page (and every other WebGL view) isn't hidden and remounted. */}
+        <Suspense fallback={null}>
+          <AxisHelper />
+        </Suspense>
 
         {/* Supporting beams for elevated track points */}
-        <SupportingBeams curvePoints={curvePoints} />
+        {mode === 'coaster' && <SupportingBeams curvePoints={curvePoints} />}
 
         {points.map((pos, i) => (
           <DraggablePoint
@@ -1067,7 +923,11 @@ const CourseEditor: FC<CourseEditorProps> = ({
         ))}
 
         {/* Realistic rollercoaster tracks instead of simple red line */}
-        <RollercoasterTracks curvePoints={curvePoints} />
+        {mode === 'coaster' ? (
+          <RollercoasterTracks curvePoints={curvePoints} />
+        ) : (
+          <FlightPath curvePoints={curvePoints} />
+        )}
 
         {/* Animated progress dot */}
         <ProgressDot curve={curve} progress={progress} isVisible={true} />
